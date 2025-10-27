@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+
+
+
 # logrotate.sh
 # Script per la gestione di file di log già ruotati
 # Si ispira al noto programma 'logrotate', 
@@ -18,7 +22,6 @@
 # e risalta soprattutto nella gestione dei pattern di ricerca.
 # Infatti questo script utilizza una serie di pattern personalizzabili
 # sui quali vengono effettuate le operazioni di ricerca, compressione ed eliminazione dei file.
-
 
 # ======================
 # --- CONFIGURAZIONE ---
@@ -67,10 +70,24 @@ FILE_TIMESTAMP_TYPE="mtime"       # Valori possibili: mtime, ctime, atime
 
 
 
-
 # Inizializzazione della variabile che determina 
 # se il run è dry (senza apportare modifiche) o meno.
 DRY_RUN=false
+
+
+
+shopt -s inherit_errexit  # aiuta in funzioni/subshell (bash >= 4.4)
+
+on_exit() {
+    local exit_code=$?
+    local last_cmd=${BASH_COMMAND:-"<none>"}
+    if [[ $exit_code -ne 0 ]]; then
+        echo "❌ Errore nello script. Ultimo comando: '$last_cmd' (exit code: $exit_code)"
+    fi
+}
+
+trap on_exit EXIT
+
 
 
 # ======================================
@@ -98,8 +115,7 @@ declare -a PATTERNS=(
 "/u01/app/oracle/admin/*/?server/*/servers/*/logs/access.log*"
 "/u01/app/oracle/admin/*/?server/*/servers/*/logs/AdminServer.log*"
 "/u01/app/oracle/admin/*/*/*/servers/*/logs/*.log*"
-"/home/*/Downloads/*/*.sh"
-"/home/*/Downloads/remotedir/bash/*/*.sh"
+"/home/matteo/*/remotedir/bash/*/*.sh"
 # aggiungi altri pattern qui per gestirli
 )
 
@@ -127,9 +143,14 @@ declare -a BLACKLIST_FILES=(
 # ==========================
 # --- GESTIONE ARGOMENTI ---
 # ==========================
-for arg in "$@"; do
-	[[ "$arg" == "--dry" ]] && DRY_RUN=true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry) DRY_RUN=true; shift ;;
+    -h|--help) help; exit 0 ;;
+    *) echo "Opzione sconosciuta: $1"; help; exit 1 ;;
+  esac
 done
+
 
 # =================
 # --- CONTATORI ---
@@ -189,14 +210,14 @@ compress_files() {
 		# Blacklist check
 		if is_blacklisted "$(basename "$file")"; then
 			log_msg "Skipping blacklisted file: $file"
-			((count_skipped_blacklist++))
+			((++count_skipped_blacklist))
 			continue
 		fi
 
 		# lsof check
 		if command -v lsof &>/dev/null && lsof "$file" &>/dev/null; then
 			log_msg "Skipping open file: $file"
-			((count_skipped_open++))
+			((++count_skipped_open))
 			continue
 		fi
 
@@ -211,7 +232,7 @@ compress_files() {
 		local age=$((now - file_time))
 		if (( age < MAX_AGE )); then
 			log_msg "Skipping recent file (age ${age}s < ${MAX_AGE}s): $file"
-			((count_skipped_recent++))
+			((++count_skipped_recent))
 			continue
 		fi
 
@@ -226,20 +247,20 @@ compress_files() {
 
 		if [[ -f "$gzfile" ]]; then
 			log_msg "File già compresso: $gzfile"
-			((count_already_compressed++))
+			((++count_already_compressed))
 			continue
 		fi
 
 		if [[ "$DRY_RUN" == true ]]; then
 			log_msg "[DRY-RUN] Comprimerò: $file -> $gzfile"
-			((count_compressed++))
+			((++count_compressed))
 		else
 			if gzip --suffix="$suffix" "$file"; then
 				log_msg "Compresso: $file -> $gzfile"
-				((count_compressed++))
+				((++count_compressed))
 			else
 				log_msg "Errore compressione: $file"
-				((count_errors++))
+				((++count_errors))
 			fi
 		fi
 	done
@@ -268,14 +289,14 @@ cleanup_old_compressed_files() {
 		for file in "${old_files[@]}"; do
 			if [[ "$DRY_RUN" == true ]]; then
 				log_msg "[DRY-RUN] Eliminerei: $file"
-				((count_deleted++))
+				((++count_deleted))
 			else
 				if rm -f "$file"; then
 					log_msg "Eliminato: $file"
-					((count_deleted++))
+					((++count_deleted))
 				else
 					log_msg "Errore eliminazione: $file"
-					((count_delete_errors++))
+					((++count_delete_errors))
 				fi
 			fi
 		done
